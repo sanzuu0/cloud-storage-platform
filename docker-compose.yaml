@@ -68,6 +68,67 @@ services:
     networks:
       - backend
 
+
+  # --- Микросервисы ---
+  auth-service:
+    build: ./auth-service
+    env_file:
+      - ./configs/auth.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    networks:
+      - backend
+
+  user-service:
+    build: ./user-service
+    env_file:
+      - ./configs/user.env
+    ports:
+      - "8001:8001"
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - backend
+
+  storage-service:
+    build: ./storage-service
+    env_file:
+      - ./configs/storage.env
+    ports:
+      - "8002:8002"
+    depends_on:
+      - postgres
+      - kafka
+      - minio
+    networks:
+      - backend
+
+  notification-service:
+    build: ./notification-service
+    env_file:
+      - ./configs/notification.env
+    depends_on:
+      - kafka
+    networks:
+      - backend
+
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth-service
+      - user-service
+      - storage-service
+    networks:
+      - backend
+
+
 networks:
   backend:
 
