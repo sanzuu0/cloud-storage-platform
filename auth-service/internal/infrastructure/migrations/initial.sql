@@ -1,0 +1,5 @@
+-- TODO: Написать миграцию создания таблицы users
+--  - id (uuid primary key)
+--  - email (unique)
+--  - password_hash
+--  - created_at
