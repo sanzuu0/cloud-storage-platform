@@ -5,3 +5,9 @@ package command
 //  - Password
 //  - Username (если понадобится потом)
 //  - Для передачи данных в Service.RegisterUser
+
+type RegisterCommand struct {
+	Email    string
+	Password string
+	Username string
+}
