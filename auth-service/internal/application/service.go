@@ -112,6 +112,44 @@ func (s *Service) Login(ctx context.Context, cmd query.LoginQuery) (domain.Token
 	}, nil
 }
 
-func (s *Service) Refresh(ctx context.Context, refreshToken string) error {
-	return nil
+func (s *Service) Refresh(ctx context.Context, refreshToken string) (domain.TokenPair, error) {
+
+	// Проверка JWT-подписи (валиден ли refresh токен по структуре и подписи)
+	userIDFromJWT, err := s.tokenManager.ValidateRefreshToken(refreshToken)
+	if err != nil {
+		return domain.TokenPair{}, fmt.Errorf("could not validate refresh token: %w", err)
+	}
+
+	// Проверка существования этого токена в Redis
+	userIDFromRedis, err := s.tokenManager.GetUserIDByRefreshToken(ctx, refreshToken)
+	if err != nil {
+		return domain.TokenPair{}, fmt.Errorf("could not get user ID by refresh token: %w", err)
+	}
+
+	// Проверим те ли это июзеры
+	if userIDFromRedis != userIDFromJWT {
+		return domain.TokenPair{}, fmt.Errorf("token mismatch")
+	}
+
+	// создаем refresh и access токены
+	newAccessToken, err := s.tokenManager.GenerateAccessToken(userIDFromJWT)
+	if err != nil {
+		return domain.TokenPair{}, fmt.Errorf("could not generate access token: %w", err)
+	}
+
+	newRefreshToken, err := s.tokenManager.GenerateRefreshToken(userIDFromJWT)
+	if err != nil {
+		return domain.TokenPair{}, fmt.Errorf("could not generate refresh token: %w", err)
+	}
+
+	// Сохраняем новый refresh токен
+	err = s.sessionStore.SaveRefreshToken(ctx, userIDFromJWT, newRefreshToken, time.Hour*24*30)
+	if err != nil {
+		return domain.TokenPair{}, fmt.Errorf("could not save refresh token: %w", err)
+	}
+
+	return domain.TokenPair{
+		AccessToken:  newAccessToken,
+		RefreshToken: newRefreshToken,
+	}, nil
 }

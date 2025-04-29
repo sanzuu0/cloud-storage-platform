@@ -26,4 +26,5 @@ type TokenManager interface {
 	GenerateRefreshToken(userID domain.UUID) (string, error)
 	ValidateAccessToken(token string) (domain.UUID, error)
 	ValidateRefreshToken(token string) (domain.UUID, error)
+	GetUserIDByRefreshToken(ctx context.Context, refreshToken string) (uuid.UUID, error)
 }
