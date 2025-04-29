@@ -10,7 +10,6 @@ import (
 	"github.com/sanzuu0/cloud-storage-platform/auth-service/internal/domain"
 	"github.com/sanzuu0/cloud-storage-platform/auth-service/internal/infrastructure/repository/postgres"
 	"golang.org/x/crypto/bcrypt"
-	"regexp"
 	"time"
 )
 
@@ -36,25 +35,19 @@ func NewService(userRepository UserRepository, sessionStore SessionStore, tokenM
 
 func (s *Service) Register(ctx context.Context, cmd command.RegisterCommand) error {
 
-	// проверка почты
-	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
-
-	if !emailRegex.MatchString(cmd.Email) {
-		err := fmt.Errorf("invalid email format")
-		return err
+	// проверка формата почты
+	errEmailValidator := emailValidator(cmd)
+	if errEmailValidator != nil {
+		return fmt.Errorf("invalid email format: %w", errEmailValidator)
 	}
 
-	// проверка пароля
-	hasLetter := regexp.MustCompile(`[a-zA-Z]`).MatchString(cmd.Password)
-	hasNumber := regexp.MustCompile(`[0-9]`).MatchString(cmd.Password)
-	hasSpecial := regexp.MustCompile(`[!@#\$%\^&\*]`).MatchString(cmd.Password)
-
-	if len(cmd.Password) < 8 || !hasLetter || !hasNumber || !hasSpecial {
-		err := fmt.Errorf("password must contain at least 8 characters")
-		return err
+	// проверка формата пароля
+	errPasswordValidator := passwordValidator(cmd)
+	if errPasswordValidator != nil {
+		return fmt.Errorf("invalid password: %w", errPasswordValidator)
 	}
 
-	// проверка есть ли пользователь
+	// существует ли такой пользователь в бд
 	_, err := s.userRepository.GetUserByEmail(ctx, cmd.Email)
 
 	if err == nil {
