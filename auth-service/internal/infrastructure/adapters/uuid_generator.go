@@ -11,6 +11,10 @@ import (
 
 type GoogleUUIDGenerator struct{}
 
+func NewGoogleUUIDGenerator() *GoogleUUIDGenerator {
+	return &GoogleUUIDGenerator{}
+}
+
 func (GoogleUUIDGenerator) NewUUID() uuid.UUID {
 	return uuid.New()
 }
