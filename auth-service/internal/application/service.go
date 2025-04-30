@@ -6,44 +6,43 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/sanzuu0/cloud-storage-platform/auth-service/internal/application/command"
+	"github.com/sanzuu0/cloud-storage-platform/auth-service/internal/application/interfaces"
 	"github.com/sanzuu0/cloud-storage-platform/auth-service/internal/application/query"
 	"github.com/sanzuu0/cloud-storage-platform/auth-service/internal/domain"
 	"github.com/sanzuu0/cloud-storage-platform/auth-service/internal/infrastructure/repository/postgres"
-	"golang.org/x/crypto/bcrypt"
 	"time"
 )
 
 type Service struct {
-	userRepository UserRepository
-	sessionStore   SessionStore
-	tokenManager   TokenManager
+	userRepository interfaces.UserRepository
+	sessionStore   interfaces.SessionStore
+	tokenManager   interfaces.TokenManager
+	passwordHash   domain.PasswordHash
+	uuidGenerator  domain.UUIDGenerator
+	clock          domain.Clock
 }
 
-func NewService(userRepository UserRepository, sessionStore SessionStore, tokenManager TokenManager) *Service {
+func NewService(
+	userRepository interfaces.UserRepository,
+	sessionStore interfaces.SessionStore,
+	tokenManager interfaces.TokenManager,
+	hash domain.PasswordHash,
+	uuidGen domain.UUIDGenerator,
+	clock domain.Clock,
+) *Service {
 	return &Service{
 		userRepository: userRepository,
 		sessionStore:   sessionStore,
 		tokenManager:   tokenManager,
+		passwordHash:   hash,
+		uuidGenerator:  uuidGen,
+		clock:          clock,
 	}
 }
 
 func (s *Service) Register(ctx context.Context, cmd command.RegisterCommand) error {
-
-	// проверка формата почты
-	errEmailValidator := ValidateEmail(cmd.Email)
-	if errEmailValidator != nil {
-		return fmt.Errorf("invalid email format: %w", errEmailValidator)
-	}
-
-	// проверка формата пароля
-	errPasswordValidator := ValidatePassword(cmd.Password)
-	if errPasswordValidator != nil {
-		return fmt.Errorf("invalid password: %w", errPasswordValidator)
-	}
-
-	// существует ли такой пользователь в бд
+	// Проверяем, не существует ли пользователь с таким email
 	_, err := s.userRepository.GetUserByEmail(ctx, cmd.Email)
-
 	if err == nil {
 		return fmt.Errorf("user with email %s already exists", cmd.Email)
 	}
@@ -51,56 +50,51 @@ func (s *Service) Register(ctx context.Context, cmd command.RegisterCommand) err
 		return fmt.Errorf("could not check user existence: %w", err)
 	}
 
-	// хеширование пароля
-	hashBytePassword, err := bcrypt.GenerateFromPassword([]byte(cmd.Password), bcrypt.DefaultCost)
-	hashPassword := string(hashBytePassword)
-	if err != nil {
-		return fmt.Errorf("could not hash password: %w", err)
-	}
-
-	// создание пользователя
-	UUID, err := uuid.NewUUID()
-	if err != nil {
-		return fmt.Errorf("could not create UUID: %w", err)
-	}
-	newUser := domain.NewUser(UUID, cmd.Email, hashPassword, time.Now())
-
-	// запись юзера в бд
-	err = s.userRepository.CreateUser(ctx, newUser)
+	newUser, err := domain.NewUserFromRegister(
+		s.uuidGenerator,
+		cmd.Email,
+		cmd.Password,
+		s.clock,
+		s.passwordHash,
+	)
 	if err != nil {
 		return fmt.Errorf("could not create user: %w", err)
+	}
+
+	err = s.userRepository.CreateUser(ctx, newUser)
+	if err != nil {
+		return fmt.Errorf("could not save user: %w", err)
 	}
 
 	return nil
 }
 
 func (s *Service) Login(ctx context.Context, cmd query.LoginQuery) (domain.TokenPair, error) {
-
-	// возьмем пользователя из бд
 	user, err := s.userRepository.GetUserByEmail(ctx, cmd.Email)
 	if err != nil {
 		return domain.TokenPair{}, fmt.Errorf("could not get user: %w", err)
 	}
 
-	// проверка на идентичность паролей
-	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(cmd.Password))
+	password, err := domain.NewPassword(cmd.Password)
+	if err != nil {
+		return domain.TokenPair{}, fmt.Errorf("could not parse password: %w", err)
+	}
+
+	err = user.CheckPassword(password, s.passwordHash)
 	if err != nil {
 		return domain.TokenPair{}, fmt.Errorf("invalid password: %w", err)
 	}
 
-	// Генерируем access токен
 	tokenAccess, err := s.tokenManager.GenerateAccessToken(user.ID)
 	if err != nil {
 		return domain.TokenPair{}, fmt.Errorf("could not generate access token: %w", err)
 	}
 
-	// Генерируем refresh токен
 	tokenRefresh, err := s.tokenManager.GenerateRefreshToken(user.ID)
 	if err != nil {
 		return domain.TokenPair{}, fmt.Errorf("could not generate refresh token: %w", err)
 	}
 
-	// сохраняем refresh токен в redis
 	err = s.sessionStore.SaveRefreshToken(ctx, user.ID, tokenRefresh, time.Hour*24*30)
 	if err != nil {
 		return domain.TokenPair{}, fmt.Errorf("could not save refresh token: %w", err)
@@ -113,43 +107,58 @@ func (s *Service) Login(ctx context.Context, cmd query.LoginQuery) (domain.Token
 }
 
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (domain.TokenPair, error) {
-
-	// Проверка JWT-подписи (валиден ли refresh токен по структуре и подписи)
 	userIDFromJWT, err := s.tokenManager.ValidateRefreshToken(refreshToken)
 	if err != nil {
 		return domain.TokenPair{}, fmt.Errorf("could not validate refresh token: %w", err)
 	}
 
-	// Проверка существования этого токена в Redis
 	userIDFromRedis, err := s.tokenManager.GetUserIDByRefreshToken(ctx, refreshToken)
 	if err != nil {
 		return domain.TokenPair{}, fmt.Errorf("could not get user ID by refresh token: %w", err)
 	}
 
-	// Проверим те ли это июзеры
-	if userIDFromRedis != userIDFromJWT {
-		return domain.TokenPair{}, fmt.Errorf("token mismatch")
+	// Проверяем, что токен не был подделан (ID из Redis и JWT должны совпадать)
+	err = validateUserIDConsistency(userIDFromJWT, userIDFromRedis)
+	if err != nil {
+		return domain.TokenPair{}, fmt.Errorf("could not validate refresh token: %w", err)
 	}
 
-	// создаем refresh и access токены
 	newAccessToken, err := s.tokenManager.GenerateAccessToken(userIDFromJWT)
 	if err != nil {
 		return domain.TokenPair{}, fmt.Errorf("could not generate access token: %w", err)
 	}
 
-	newRefreshToken, err := s.tokenManager.GenerateRefreshToken(userIDFromJWT)
+	newRefreshToken, err := s.generateAndStoreRefreshToken(ctx, userIDFromJWT)
 	if err != nil {
-		return domain.TokenPair{}, fmt.Errorf("could not generate refresh token: %w", err)
-	}
-
-	// Сохраняем новый refresh токен
-	err = s.sessionStore.SaveRefreshToken(ctx, userIDFromJWT, newRefreshToken, time.Hour*24*30)
-	if err != nil {
-		return domain.TokenPair{}, fmt.Errorf("could not save refresh token: %w", err)
+		return domain.TokenPair{}, err
 	}
 
 	return domain.TokenPair{
 		AccessToken:  newAccessToken,
 		RefreshToken: newRefreshToken,
 	}, nil
+}
+
+// validateUserIDConsistency проверяет, совпадают ли ID из JWT и из Redis.
+// Это защита от подмены refresh-токена.
+func validateUserIDConsistency(userIDFromJWT, userIDFromRedis uuid.UUID) error {
+	if userIDFromRedis != userIDFromJWT {
+		return fmt.Errorf("invalid userID from redis")
+	}
+	return nil
+}
+
+// generateAndStoreRefreshToken генерирует новый refresh токен и сохраняет его в sessionStore.
+func (s *Service) generateAndStoreRefreshToken(ctx context.Context, userID uuid.UUID) (string, error) {
+	refreshToken, err := s.tokenManager.GenerateRefreshToken(userID)
+	if err != nil {
+		return "", fmt.Errorf("could not generate refresh token: %w", err)
+	}
+
+	err = s.sessionStore.SaveRefreshToken(ctx, userID, refreshToken, time.Hour*24*30)
+	if err != nil {
+		return "", fmt.Errorf("could not save refresh token: %w", err)
+	}
+
+	return refreshToken, nil
 }

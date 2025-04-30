@@ -9,8 +9,8 @@ import (
 	_ "github.com/google/uuid"
 )
 
-type UUIDCreator struct{}
+type GoogleUUIDGenerator struct{}
 
-func (UUIDCreator) NewUUID() uuid.UUID {
+func (GoogleUUIDGenerator) NewUUID() uuid.UUID {
 	return uuid.New()
 }

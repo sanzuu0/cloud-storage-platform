@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -16,16 +17,46 @@ import (
 
 type User struct {
 	ID           UUID
-	Email        string
+	Email        Email
 	PasswordHash string
 	CreatedAt    time.Time
 }
 
-func NewUser(id UUID, email string, password string, createdAt time.Time) User {
+func NewUserFromRegister(
+	uuid UUIDGenerator,
+	rawEmail string,
+	rawPassword string,
+	clock Clock,
+	hashing PasswordHash,
+) (User, error) {
+
+	id := uuid.NewUUID()
+
+	email, err := NewEmail(rawEmail)
+	if err != nil {
+		return User{}, fmt.Errorf("cannot create email: %w", err)
+	}
+
+	password, err := NewPassword(rawPassword)
+	if err != nil {
+		return User{}, fmt.Errorf("error creating password: %w", err)
+	}
+
+	hashPassword, err := hashing.Hash(password.String())
+	if err != nil {
+		return User{}, fmt.Errorf("error hashing password: %w", err)
+	}
+
+	timeCreated := clock.Now()
+
 	return User{
 		ID:           id,
 		Email:        email,
-		PasswordHash: password,
-		CreatedAt:    createdAt,
-	}
+		PasswordHash: hashPassword,
+		CreatedAt:    timeCreated,
+	}, nil
+}
+
+func (u *User) CheckPassword(password Password, hashing PasswordHash) error {
+	return hashing.Compare(u.PasswordHash, password.String())
 }
