@@ -140,7 +140,6 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (domain.Toke
 }
 
 // validateUserIDConsistency проверяет, совпадают ли ID из JWT и из Redis.
-// Это защита от подмены refresh-токена.
 func validateUserIDConsistency(userIDFromJWT, userIDFromRedis uuid.UUID) error {
 	if userIDFromRedis != userIDFromJWT {
 		return fmt.Errorf("invalid userID from redis")

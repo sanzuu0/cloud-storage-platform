@@ -5,16 +5,6 @@ import (
 	"time"
 )
 
-// TODO: Описать сущность пользователя
-//  - UUID идентификатор
-//  - Email
-//  - PasswordHash
-//  - CreatedAt
-
-// TODO: Возможно добавить методы валидации (например, проверка корректности Email)
-
-// USER - сущность пользователя в сисеме
-
 type User struct {
 	ID           UUID
 	Email        Email

@@ -2,22 +2,18 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"github.com/sanzuu0/cloud-storage-platform/auth-service/config"
 	"github.com/sanzuu0/cloud-storage-platform/auth-service/internal/application"
+	"github.com/sanzuu0/cloud-storage-platform/auth-service/internal/application/command"
 	"github.com/sanzuu0/cloud-storage-platform/auth-service/internal/domain"
 	"github.com/sanzuu0/cloud-storage-platform/auth-service/internal/infrastructure/adapters"
+	"github.com/sanzuu0/cloud-storage-platform/auth-service/internal/infrastructure/repository/postgres"
 	"log"
 	"time"
 )
-
-// --- заглушка UserRepository ---
-func (stubUserRepository) CreateUser(ctx context.Context, user domain.User) error {
-	return nil
-}
-func (stubUserRepository) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
-	return domain.User{}, nil
-}
 
 // --- заглушка SessionStore ---
 func (stubSessionStore) Save(ctx context.Context, session domain.Session) error {
@@ -53,20 +49,22 @@ func (stubTokenManager) GetUserIDByRefreshToken(ctx context.Context, token strin
 	return uuid.New(), nil
 }
 
-type stubUserRepository struct{}
 type stubSessionStore struct{}
 type stubTokenManager struct{}
 
 func Run(cfg config.Config) error {
 
-	passwordHash := adapters.NewBcryptHash()
-	uuidGenerator := adapters.NewGoogleUUIDGenerator()
-	clock := adapters.NewSystemClock()
+	db, err := sqlx.Connect("postgres", cfg.PostgresDSN)
+	if err != nil {
+		return err
+	}
 
-	// TODO: временные заглушки для репозиториев
-	userRepo := stubUserRepository{}
+	userRepo := postgres.NewUserRepository(db)
 	sessionStore := stubSessionStore{}
 	tokenManager := stubTokenManager{}
+	passwordHash := adapters.BcryptHash{}
+	uuidGenerator := adapters.GoogleUUIDGenerator{}
+	clock := adapters.SystemClock{}
 
 	// Сборка сервиса
 	service := application.NewService(
@@ -78,10 +76,16 @@ func Run(cfg config.Config) error {
 		clock,
 	)
 
-	// Пока просто логируем успешную инициализацию
-	log.Printf("Service initialized: %+v", service)
+	err = service.Register(context.Background(), command.RegisterCommand{
+		Email:    "test@example.com",
+		Password: "P@ssw0rd123!",
+	})
+	if err != nil {
+		return fmt.Errorf("failed to register user: %w", err)
+	}
+	log.Println("✅ User successfully registered!")
 
-	// TODO: Здесь будет запуск сервера (HTTP или gRPC)
+	log.Printf("Service initialized: %+v", service)
 
 	return nil
 }

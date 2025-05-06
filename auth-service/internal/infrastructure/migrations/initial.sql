@@ -1,5 +1,6 @@
--- TODO: Написать миграцию создания таблицы users
---  - id (uuid primary key)
---  - email (unique)
---  - password_hash
---  - created_at
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL
+);

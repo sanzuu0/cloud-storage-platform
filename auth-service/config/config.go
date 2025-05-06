@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/joho/godotenv"
 	"log"
 	"os"
 	"time"
@@ -22,6 +23,11 @@ type Config struct {
 }
 
 func Load() Config {
+
+	if err := godotenv.Load("./auth-service/.env"); err != nil {
+		log.Println("⚠️  .env file not found or failed to load")
+	}
+
 	cfg := Config{
 		HTTPPort:        getEnv("HTTP_PORT", ":8080"),
 		PostgresDSN:     mustEnv("POSTGRES_DSN"),

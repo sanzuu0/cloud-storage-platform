@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/sanzuu0/cloud-storage-platform/auth-service/config"
 	"github.com/sanzuu0/cloud-storage-platform/auth-service/internal/app"
+	_ "github.com/sanzuu0/cloud-storage-platform/auth-service/internal/application/command"
 	"log"
 )
 
